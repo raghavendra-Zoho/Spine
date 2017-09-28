@@ -135,7 +135,7 @@ public struct Query<T: Resource> {
 	// MARK: Filtering
 	
 	fileprivate mutating func addPredicateWithField(_ fieldName: String, value: Any, type: NSComparisonPredicate.Operator) {
-		addPredicateWithKey(field.name, value: value, type: type)
+		addPredicateWithKey(fieldName, value: value, type: type)
 	}
 	
 	fileprivate mutating func addPredicateWithKey(_ key: String, value: Any, type: NSComparisonPredicate.Operator) {
@@ -376,7 +376,7 @@ public struct Query<T: Resource> {
 	- returns: The query
 	*/
 	public mutating func addAscendingOrder(_ fieldName: String) {
-		sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: true))
+		sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: false))
 	}
 	
 	/**
