@@ -135,11 +135,7 @@ public struct Query<T: Resource> {
 	// MARK: Filtering
 	
 	fileprivate mutating func addPredicateWithField(_ fieldName: String, value: Any, type: NSComparisonPredicate.Operator) {
-		if let field = T.fields.filter({ $0.name == fieldName }).first {
-			addPredicateWithKey(field.name, value: value, type: type)
-		} else {
-			assertionFailure("Resource of type \(T.resourceType) does not contain a field named \(fieldName)")
-		}
+		addPredicateWithKey(field.name, value: value, type: type)
 	}
 	
 	fileprivate mutating func addPredicateWithKey(_ key: String, value: Any, type: NSComparisonPredicate.Operator) {
@@ -380,11 +376,7 @@ public struct Query<T: Resource> {
 	- returns: The query
 	*/
 	public mutating func addAscendingOrder(_ fieldName: String) {
-		if let _ = T.field(named: fieldName) {
-			sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: true))
-		} else {
-			assertionFailure("Cannot add order on field \(fieldName) of resource \(T.resourceType). No such field has been configured.")
-		}
+		sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: true))
 	}
 	
 	/**
@@ -395,11 +387,7 @@ public struct Query<T: Resource> {
 	- returns: The query
 	*/
 	public mutating func addDescendingOrder(_ fieldName: String) {
-		if let _ = T.field(named: fieldName) {
-			sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: false))
-		} else {
-			assertionFailure("Cannot add order on field \(fieldName) of resource \(T.resourceType). No such field has been configured.")
-		}
+		sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: false))
 	}
 	
 	
