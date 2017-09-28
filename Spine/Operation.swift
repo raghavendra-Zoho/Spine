@@ -209,158 +209,109 @@ class DeleteOperation: ConcurrentOperation {
 }
 
 /// A SaveOperation updates or adds a resource in a Spine.
-class SaveOperation: ConcurrentOperation {
-	/// The resource to save.
-	let resource: Resource
-	
-	/// The result of the operation. You can safely force unwrap this in the completionBlock.
-	var result: Failable<Void, SpineError>?
-	
-	/// Whether the resource is a new resource, or an existing resource.
-	fileprivate let isNewResource: Bool
-	
-	fileprivate let relationshipOperationQueue = OperationQueue()
-	
-	init(resource: Resource, spine: Spine) {
-		self.resource = resource
-		self.isNewResource = (resource.id == nil)
-		super.init()
-		self.spine = spine
-		self.relationshipOperationQueue.maxConcurrentOperationCount = 1
-		self.relationshipOperationQueue.addObserver(self, forKeyPath: "operations", options: NSKeyValueObservingOptions(), context: nil)
-	}
-	
-	deinit {
-		self.relationshipOperationQueue.removeObserver(self, forKeyPath: "operations")
-	}
-	
-	override func execute() {
-		// First update relationships if this is an existing resource. Otherwise the local relationships
-		// are overwritten with data that is returned from saving the resource.
-		if isNewResource {
-			updateResource()
-		} else {
-			updateRelationships()
-		}
-	}
-
-	fileprivate func updateResource() {
-		let url: URL
-		let method: String
-		let options: SerializationOptions
-		
-		if isNewResource {
-			url = router.urlForResourceType(resource.resourceType)
-			method = "POST"
-			options = [.IncludeToOne, .IncludeToMany]
-		} else {
-			url = router.urlForQuery(Query(resource: resource))
-			method = "PATCH"
-			options = [.IncludeID]
-		}
-		
-		let payload: Data
-		
-		do {
-			payload = try serializer.serializeResources([resource], options: options)
-		} catch let error {
-			result = .failure(error as! SpineError)
-			state = .Finished
-			return
-		}
-
-		Spine.logInfo(.spine, "Saving resource \(resource) using URL: \(url)")
-		
-		networkClient.request(method: method, url: url, payload: payload) { statusCode, responseData, networkError in
-			defer { self.state = .Finished }
-			
-			if let error = networkError {
-				self.result = Failable.failure(SpineError.networkError(error))
-				return
-			}
-			
-			let success = statusCodeIsSuccess(statusCode)
-			let document: JSONAPIDocument?
-			if let data = responseData , data.count > 0 {
-				do {
-					// Don't map onto the resources if the response is not in the success range.
-					let mappingTargets: [Resource]? = success ? [self.resource] : nil
-					document = try self.serializer.deserializeData(data, mappingTargets: mappingTargets)
-				} catch let error {
-					self.result = .failure(promoteToSpineError(error))
-					return
-				}
-			} else {
-				document = nil
-			}
-			
-			if success {
-				self.result = .success()
-			} else {
-				let error = errorFromStatusCode(statusCode!, additionalErrors: document?.errors)
-				self.result = .failure(error)
-			}
-		}
-	}
-	
-	/// Serializes `resource` into NSData using `options`. Any error that occurs is rethrown as a SpineError.
-	fileprivate func serializePayload(_ resource: Resource, options: SerializationOptions) throws -> Data {
-		do {
-			let payload = try serializer.serializeResources([resource], options: options)
-			return payload
-		} catch let error {
-			throw promoteToSpineError(error)
-		}
-	}
-
-	fileprivate func updateRelationships() {
-		let relationships = resource.fields.filter { $0 is Relationship }
-		
-		guard !relationships.isEmpty else {
-			updateResource()
-			return
-		}
-		
-		let completionHandler: (_ result: Failable<Void, SpineError>?) -> Void = { result in
-			if let error = result?.error {
-				self.relationshipOperationQueue.cancelAllOperations()
-				self.result = Failable(error)
-				self.state = .Finished
-			}
-		}
-		
-		for relationship in relationships {
-			switch relationship {
-			case let toOne as ToOneRelationship:
-				let operation = RelationshipReplaceOperation(resource: resource, relationship: toOne, spine: spine)
-				operation.completionBlock = { [unowned operation] in completionHandler(operation.result) }
-				relationshipOperationQueue.addOperation(operation)
-
-			case let toMany as ToManyRelationship:
-				let addOperation = RelationshipMutateOperation(resource: resource, relationship: toMany, mutation: .add, spine: spine)
-				addOperation.completionBlock = { [unowned addOperation] in completionHandler(addOperation.result) }
-				relationshipOperationQueue.addOperation(addOperation)
-				
-				let removeOperation = RelationshipMutateOperation(resource: resource, relationship: toMany, mutation: .remove, spine: spine)
-				removeOperation.completionBlock = { [unowned removeOperation] in completionHandler(removeOperation.result) }
-				relationshipOperationQueue.addOperation(removeOperation)
-			default: ()
-			}
-		}
-	}
-	
-	override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-		guard let path = keyPath, let queue = object as? OperationQueue , path == "operations" && queue == relationshipOperationQueue else {
-			super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
-			return
-		}
-		
-		if queue.operationCount == 0 {
-			// At this point, we know all relationships are updated
-			updateResource()
-		}
-	}
-}
+open func urlForQuery<T: Resource>(_ query: Query<T>) -> URL {
+        let url: URL
+        let preBuiltURL: Bool
+        
+        // Base URL
+        if let urlString = query.url?.absoluteString {
+            url = URL(string: urlString, relativeTo: baseURL)!
+            preBuiltURL = true
+        } else if let type = query.resourceType {
+            url = urlForResourceType(type)
+            preBuiltURL = false
+        } else {
+            preconditionFailure("Cannot build URL for query. Query does not have a URL, nor a resource type.")
+        }
+        
+        var urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: true)!
+        var queryItems: [URLQueryItem] = urlComponents.queryItems ?? []
+        
+        // Resource IDs
+        if !preBuiltURL {
+            if let ids = query.resourceIDs {
+                if ids.count == 1 {
+                    urlComponents.path = (urlComponents.path as NSString).appendingPathComponent(ids.first!)
+                } else {
+                    let item = URLQueryItem(name: "filter[id]", value: ids.joined(separator: ","))
+                    appendQueryItem(item, to: &queryItems)
+                }
+            }
+        }
+        
+        // Includes
+        if !query.includes.isEmpty {
+            var resolvedIncludes = [String]()
+            
+            for include in query.includes {
+                var keys = [String]()
+                
+                var relatedResourceType: Resource.Type = T.self
+                for part in include.components(separatedBy: ".") {
+                    if let relationship = relatedResourceType.field(named: part) as? Relationship {
+                        keys.append(keyFormatter.format(relationship))
+                        relatedResourceType = relationship.linkedType
+                    }
+                }
+                
+                resolvedIncludes.append(keys.joined(separator: "."))
+            }
+            
+            let item = URLQueryItem(name: "include", value: resolvedIncludes.joined(separator: ","))
+            appendQueryItem(item, to: &queryItems)
+        }
+        
+        // Filters
+        for filter in query.filters {
+            let fieldName = filter.leftExpression.keyPath
+            var item: URLQueryItem?
+            if let field = T.field(named: fieldName) {
+                item = queryItemForFilter(on: keyFormatter.format(field), value: filter.rightExpression.constantValue, operatorType: filter.predicateOperatorType)
+            } else {
+                item = queryItemForFilter(on: fieldName, value: filter.rightExpression.constantValue, operatorType: filter.predicateOperatorType)
+            }
+            appendQueryItem(item!, to: &queryItems)
+        }
+        
+        // Fields
+        for (resourceType, fields) in query.fields {
+            let keys = fields.map { fieldName in
+                return keyFormatter.format(T.field(named: fieldName)!)
+            }
+            let item = URLQueryItem(name: "fields[\(resourceType)]", value: keys.joined(separator: ","))
+            appendQueryItem(item, to: &queryItems)
+        }
+        
+        // Sorting
+        if !query.sortDescriptors.isEmpty {
+            let descriptorStrings = query.sortDescriptors.map { descriptor -> String in
+                //let field = descriptor.key;//T.field(named: descriptor.key!)
+                let key = descriptor.key; //self.keyFormatter.format(field!)
+                if descriptor.ascending {
+                    return key!
+                } else {
+                    return "-\(key!)"
+                }
+            }
+            
+            let item = URLQueryItem(name: "sort", value: descriptorStrings.joined(separator: ","))
+            appendQueryItem(item, to: &queryItems)
+        }
+        
+        // Pagination
+        if let pagination = query.pagination {
+            for item in queryItemsForPagination(pagination) {
+                appendQueryItem(item, to: &queryItems)
+            }
+        }
+        
+        // Compose URL
+        if !queryItems.isEmpty {
+            urlComponents.queryItems = queryItems
+        }
+        
+        return urlComponents.url!
+    }
 
 private class RelationshipOperation: ConcurrentOperation {
 	var result: Failable<Void, SpineError>?
