@@ -213,8 +213,11 @@ class SaveOperation: ConcurrentOperation {
     /// The resource to save.
     let resource: Resource
     
+    /// The resources to save.
+    let resources  : [Resource]
+    
     /// The result of the operation. You can safely force unwrap this in the completionBlock.
-    var result: Failable<Void, SpineError>?
+    var result: Failable<JSONAPIDocument, SpineError>?
     
     /// Whether the resource is a new resource, or an existing resource.
     fileprivate var isNewResource: Bool
@@ -223,6 +226,7 @@ class SaveOperation: ConcurrentOperation {
     
     init(resource: Resource, spine: Spine) {
         self.resource = resource
+        self.resources = [resource]
         self.isNewResource = (resource.id == nil)
         if(resource.resourceType == "actions"){
             self.isNewResource = true
@@ -232,7 +236,18 @@ class SaveOperation: ConcurrentOperation {
         self.relationshipOperationQueue.maxConcurrentOperationCount = 1
         self.relationshipOperationQueue.addObserver(self, forKeyPath: "operations", options: NSKeyValueObservingOptions(), context: nil)
     }
-    
+    init(resources: [Resource], spine: Spine) {
+        self.resource = resources[0]
+        self.resources = resources
+        self.isNewResource = (resource.id == nil)
+        if(resource.resourceType == "actions"){
+            self.isNewResource = true
+        }
+        super.init()
+        self.spine = spine
+        self.relationshipOperationQueue.maxConcurrentOperationCount = 1
+        self.relationshipOperationQueue.addObserver(self, forKeyPath: "operations", options: NSKeyValueObservingOptions(), context: nil)
+    }
     deinit {
         self.relationshipOperationQueue.removeObserver(self, forKeyPath: "operations")
     }
@@ -257,7 +272,11 @@ class SaveOperation: ConcurrentOperation {
             method = "POST"
             options = [.IncludeToOne,.OmitNullValues]
         } else {
-            url = router.urlForQuery(Query(resource: resource))
+            if(resources.count == 1){
+                url = router.urlForQuery(Query(resource: resource))
+            }else{
+                url = router.urlForResourceType(resource.resourceType)
+            }
             method = "PATCH"
             options = [.IncludeID,.OmitNullValues,.DirtyFieldsOnly]
         }
@@ -267,9 +286,9 @@ class SaveOperation: ConcurrentOperation {
         do {
             if(resource.resourceType == "actions"){
                 options = [.IncludeID,.IncludeToOne,.OmitNullValues]
-                payload = try serializer.serializeResources([resource], options: options)
+                payload = try serializer.serializeResources(resources, options: options)
             }else{
-                payload = try serializer.serializeResources([resource], options: options)
+                payload = try serializer.serializeResources(resources, options: options)
             }
             
         } catch let error {
@@ -293,8 +312,13 @@ class SaveOperation: ConcurrentOperation {
             if let data = responseData , data.count > 0 {
                 do {
                     // Don't map onto the resources if the response is not in the success range.
-                    let mappingTargets: [Resource]? = success ? [self.resource] : nil
+                    let mappingTargets: [Resource]? = success ? self.resources : nil
                     document = try self.serializer.deserializeData(data, mappingTargets: mappingTargets)
+                    if statusCodeIsSuccess(statusCode) {
+                        self.result = Failable(document!)
+                    } else {
+                        self.result = .failure(SpineError.serverError(statusCode: statusCode!, apiErrors: document?.errors))
+                    }
                 } catch let error {
                     self.result = .failure(promoteToSpineError(error))
                     return
@@ -304,7 +328,7 @@ class SaveOperation: ConcurrentOperation {
             }
             
             if success {
-                self.result = .success()
+                //self.result = .success(self.re)
             } else {
                 let error = errorFromStatusCode(statusCode!, additionalErrors: document?.errors)
                 self.result = .failure(error)
