@@ -376,7 +376,21 @@ open class Spine {
 
 		return promise.future
 	}
-
+    open func saveAll<T: Resource>(_ resources: [T]) -> Future<(resources: ResourceCollection, meta: Metadata?, jsonapi: JSONAPIData?), SpineError> {
+        let promise = Promise<(resources: ResourceCollection, meta: Metadata?, jsonapi: JSONAPIData?), SpineError>()
+        let operation = SaveOperation(resources: resources, spine: self)
+        operation.completionBlock = { [unowned operation] in
+            switch operation.result! {
+            case .success(let document):
+                let response = (ResourceCollection(document: document), document.meta, document.jsonapi)
+                promise.success(response)
+            case .failure(let error):
+                promise.failure(error)
+            }
+        }
+        addOperation(operation)
+        return promise.future
+    }
 	/**
 	Deletes the given resource.
 
