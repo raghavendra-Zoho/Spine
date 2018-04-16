@@ -114,6 +114,136 @@ class ConcurrentOperation: Operation {
 }
 
 
+class CopyOperation<T: Resource>: ConcurrentOperation{
+    let query: Query<T>
+    
+    let resource : Resource
+    /// The resources to save.
+    let resources  : [Resource]
+    
+    /// Whether the resource is a new resource, or an existing resource.
+    fileprivate var isNewResource: Bool
+    
+    fileprivate let relationshipOperationQueue = OperationQueue()
+    
+    /// The result of the operation. You can safely force unwrap this in the completionBlock.
+    var result: Failable<JSONAPIDocument, SpineError>?
+    
+    
+    init(resource: Resource, spine: Spine, query : Query<T>) {
+        self.query =  query
+        self.resource = resource
+        self.resources = [resource]
+        self.isNewResource = (resource.id == nil)
+        if(resource.resourceType == "actions"){
+            self.isNewResource = true
+        }
+        super.init()
+        self.spine = spine
+        self.relationshipOperationQueue.maxConcurrentOperationCount = 1
+        self.relationshipOperationQueue.addObserver(self, forKeyPath: "operations", options: NSKeyValueObservingOptions(), context: nil)
+    }
+    init(resources: [Resource], spine: Spine,query : Query<T>) {
+        self.query = query
+        self.resource = resources[0]
+        self.resources = resources
+        self.isNewResource = (resource.id == nil)
+        if(resource.resourceType == "actions"){
+            self.isNewResource = true
+        }
+        super.init()
+        self.spine = spine
+        self.relationshipOperationQueue.maxConcurrentOperationCount = 1
+        self.relationshipOperationQueue.addObserver(self, forKeyPath: "operations", options: NSKeyValueObservingOptions(), context: nil)
+    }
+    deinit {
+        self.relationshipOperationQueue.removeObserver(self, forKeyPath: "operations")
+    }
+    override func execute() {
+        // First update relationships if this is an existing resource. Otherwise the local relationships
+        // are overwritten with data that is returned from saving the resource.
+        if isNewResource {
+            updateResource()
+        } else {
+            updateResource()
+        }
+    }
+    fileprivate func updateResource() {
+        let url = spine.router.urlForQuery(query)
+        
+        Spine.logInfo(.spine, "Fetching document using URL: \(url)")
+        
+        let method = "POST"
+        var options : SerializationOptions =  [.IncludeToOne,.OmitNullValues]
+        
+        var payload: Data
+        
+        do {
+            if(resource.resourceType == "actions"){
+                options = [.IncludeID,.IncludeToOne,.OmitNullValues]
+                payload = try serializer.serializeResources(resources, options: options)
+            }else{
+                payload = try serializer.serializeResources(resources, options: options)
+                print(String(data: payload, encoding: String.Encoding.utf8))
+            }
+            
+        } catch let error {
+            result = .failure(error as! SpineError)
+            state = .Finished
+            return
+        }
+        
+        Spine.logInfo(.spine, "Saving resource \(resource) using URL: \(url)")
+        
+        networkClient.request(method: method, url: url, payload: payload) { statusCode, responseData, networkError in
+            defer { self.state = .Finished }
+            
+            print(String(data: responseData!, encoding: String.Encoding.utf8))
+            if let error = networkError {
+                self.result = Failable.failure(SpineError.networkError(error))
+                return
+            }
+            
+            let success = statusCodeIsSuccess(statusCode)
+            let document: JSONAPIDocument?
+            if let data = responseData , data.count > 0 {
+                do {
+                    // Don't map onto the resources if the response is not in the success range.
+                    let mappingTargets: [Resource]? = success ? self.resources : nil
+                    document = try self.serializer.deserializeData(data, mappingTargets: mappingTargets)
+                    if statusCodeIsSuccess(statusCode) {
+                        self.result = Failable(document!)
+                    } else {
+                        self.result = .failure(SpineError.serverError(statusCode: statusCode!, apiErrors: document?.errors))
+                    }
+                } catch let error {
+                    self.result = .failure(promoteToSpineError(error))
+                    return
+                }
+            } else {
+                document = nil
+            }
+            
+            if success {
+                //self.result = .success(self.re)
+            } else {
+                let error = errorFromStatusCode(statusCode!, additionalErrors: document?.errors)
+                self.result = .failure(error)
+            }
+        }
+    }
+    
+    /// Serializes `resource` into NSData using `options`. Any error that occurs is rethrown as a SpineError.
+    fileprivate func serializePayload(_ resource: Resource, options: SerializationOptions) throws -> Data {
+        do {
+            let payload = try serializer.serializeResources([resource], options: options)
+            return payload
+        } catch let error {
+            throw promoteToSpineError(error)
+        }
+    }
+    
+}
 // MARK: - Main operations
 
 /// FetchOperation fetches a JSONAPI document from a Spine, using a given Query.
