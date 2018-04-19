@@ -376,7 +376,7 @@ public struct Query<T: Resource> {
 	- returns: The query
 	*/
 	public mutating func addAscendingOrder(_ fieldName: String) {
-		sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: false))
+		sortDescriptors.append(NSSortDescriptor(key: fieldName, ascending: true))
 	}
 	
 	/**
