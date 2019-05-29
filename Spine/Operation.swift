@@ -49,67 +49,67 @@ Operating against a Spine
 =========================
 The `Spine` instance variable references the Spine against which to operate.
 */
-class ConcurrentOperation: Operation {
-	enum State: String {
-		case ready = "isReady"
-		case executing = "isExecuting"
-		case finished = "isFinished"
-	}
-	
-	/// The current state of the operation
-	var state: State = .ready {
-		willSet {
-			willChangeValue(forKey: newValue.rawValue)
-			willChangeValue(forKey: state.rawValue)
-		}
-		didSet {
-			didChangeValue(forKey: oldValue.rawValue)
-			didChangeValue(forKey: state.rawValue)
-		}
-	}
-	override var isReady: Bool {
-		return super.isReady && state == .ready
-	}
-	override var isExecuting: Bool {
-		return state == .executing
-	}
-	override var isFinished: Bool {
-		return state == .finished
-	}
-	override var isAsynchronous: Bool {
-		return true
-	}
-	
-	/// The Spine instance to operate against.
-	var spine: Spine!
-	
-	/// Convenience variables that proxy to their spine counterpart
-	var router: Router {
-		return spine.router
-	}
-	var networkClient: NetworkClient {
-		return spine.networkClient
-	}
-	var serializer: Serializer {
-		return spine.serializer
-	}
-	
-	override init() {}
-	
-	final override func start() {
-		if isCancelled {
-			state = .finished
-		} else {
-			state = .executing
-			main()
-		}
-	}
-	
-	final override func main() {
-		execute()
-	}
-	
-	func execute() {}
+open class ConcurrentOperation: Operation {
+    public enum State: String {
+        case Ready = "isReady"
+        case Executing = "isExecuting"
+        case Finished = "isFinished"
+    }
+    
+    /// The current state of the operation
+    public var state: State = .Ready {
+        willSet {
+            willChangeValue(forKey: newValue.rawValue)
+            willChangeValue(forKey: state.rawValue)
+        }
+        didSet {
+            didChangeValue(forKey: oldValue.rawValue)
+            didChangeValue(forKey: state.rawValue)
+        }
+    }
+    open override var isReady: Bool {
+        return super.isReady && state == .Ready
+    }
+    open override var isExecuting: Bool {
+        return state == .Executing
+    }
+    open override var isFinished: Bool {
+        return state == .Finished
+    }
+    open override var isAsynchronous: Bool {
+        return true
+    }
+    
+    /// The Spine instance to operate against.
+    var spine: Spine!
+    
+    /// Convenience variables that proxy to their spine counterpart
+    var router: Router {
+        return spine.router
+    }
+    var networkClient: NetworkClient {
+        return spine.networkClient
+    }
+    var serializer: Serializer {
+        return spine.serializer
+    }
+    
+    public override init() {}
+    
+    open override func start() {
+        if isCancelled {
+            state = .Finished
+        } else {
+            state = .Executing
+            main()
+        }
+    }
+    
+    public final override func main() {
+        execute()
+    }
+    
+    func execute() {}
 }
 
 
