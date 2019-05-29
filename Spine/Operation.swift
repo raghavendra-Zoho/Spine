@@ -50,15 +50,15 @@ private func promoteToSpineError(_ error: Error) -> SpineError {
  =========================
  The `Spine` instance variable references the Spine against which to operate.
  */
-class ConcurrentOperation: Operation {
-    enum State: String {
+open class ConcurrentOperation: Operation {
+    public enum State: String {
         case Ready = "isReady"
         case Executing = "isExecuting"
         case Finished = "isFinished"
     }
     
     /// The current state of the operation
-    var state: State = .Ready {
+    public var state: State = .Ready {
         willSet {
             willChangeValue(forKey: newValue.rawValue)
             willChangeValue(forKey: state.rawValue)
@@ -68,16 +68,16 @@ class ConcurrentOperation: Operation {
             didChangeValue(forKey: state.rawValue)
         }
     }
-    override var isReady: Bool {
+    open override var isReady: Bool {
         return super.isReady && state == .Ready
     }
-    override var isExecuting: Bool {
+    open override var isExecuting: Bool {
         return state == .Executing
     }
-    override var isFinished: Bool {
+    open override var isFinished: Bool {
         return state == .Finished
     }
-    override var isAsynchronous: Bool {
+    open override var isAsynchronous: Bool {
         return true
     }
     
@@ -95,9 +95,9 @@ class ConcurrentOperation: Operation {
         return spine.serializer
     }
     
-    override init() {}
+    public override init() {}
     
-    final override func start() {
+    open override func start() {
         if isCancelled {
             state = .Finished
         } else {
@@ -106,7 +106,7 @@ class ConcurrentOperation: Operation {
         }
     }
     
-    final override func main() {
+    public final override func main() {
         execute()
     }
     
